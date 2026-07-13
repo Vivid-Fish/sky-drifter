@@ -29,6 +29,7 @@ assets = {
     "assets/audio/thunder.wav": ("assets/audio/thunder.wav", "audio/wav"),
     "assets/audio/sky-drifter-theme.flac": ("assets/audio/sky-drifter-theme.flac", "audio/flac"),
     "assets/textures/alpine-terrain.png": ("assets/textures/alpine-terrain.png", "image/png"),
+    "assets/textures/skybox-equi.png": ("assets/textures/skybox-equi.png", "image/png"),
 }
 
 # Read bundle

@@ -25,38 +25,59 @@ try {
 }
 
 // ─── Sky ──────────────────────────────────────────────────────────
+// Procedural sky (always present — fallback if texture fails)
 const skyUniforms = { uSun: { value: new THREE.Vector3(500, 300, -800) } };
-const sky = new THREE.Mesh(
-  new THREE.SphereGeometry(3500, 32, 32),
-  new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: skyUniforms,
-    vertexShader: 'varying vec3 vp;void main(){vp=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader: `
-      uniform vec3 uSun;
-      uniform float uDayFactor;
-      varying vec3 vp;
-      void main(){
-        vec3 d=normalize(vp);
-        float y=d.y*.5+.5;
-        vec3 daySky=mix(vec3(.75,.82,.92),vec3(.35,.55,.85),smoothstep(0.0,.3,y));
-        daySky=mix(daySky,vec3(.12,.18,.45),smoothstep(.3,.8,y));
-        daySky=mix(daySky,vec3(.85,.88,.92),exp(-pow(y*3.,2.))*.5);
-        vec3 nightSky=mix(vec3(.04,.04,.1),vec3(.02,.02,.08),smoothstep(0.0,.6,y));
-        vec3 s=mix(nightSky,daySky,uDayFactor);
-        vec3 su=normalize(uSun);
-        float sd=max(dot(d,su),0.);
-        vec3 sunColor=mix(vec3(.15,.15,.3),vec3(1,.95,.8),uDayFactor);
-        s+=sunColor*pow(sd,1024.)*1.5*uDayFactor;
-        s+=sunColor*pow(sd,64.)*.2*uDayFactor;
-        s+=mix(vec3(.6,.6,.8),vec3(1,.85,.6),uDayFactor)*pow(sd,4.)*.15*uDayFactor;
-        if(d.y<0.)s=mix(s,vec3(.2,.3,.15)*uDayFactor,smoothstep(0.0,-.15,d.y));
-        gl_FragColor=vec4(s,1.);
-      }`,
-  })
-);
-sky.material.uniforms.uDayFactor = { value: 1.0 };
+const skyMatProcedural = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: skyUniforms,
+  vertexShader: 'varying vec3 vp;void main(){vp=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+  fragmentShader: `
+    uniform vec3 uSun;
+    uniform float uDayFactor;
+    varying vec3 vp;
+    void main(){
+      vec3 d=normalize(vp);
+      float y=d.y*.5+.5;
+      vec3 daySky=mix(vec3(.75,.82,.92),vec3(.35,.55,.85),smoothstep(0.0,.3,y));
+      daySky=mix(daySky,vec3(.12,.18,.45),smoothstep(.3,.8,y));
+      daySky=mix(daySky,vec3(.85,.88,.92),exp(-pow(y*3.,2.))*.5);
+      vec3 nightSky=mix(vec3(.04,.04,.1),vec3(.02,.02,.08),smoothstep(0.0,.6,y));
+      vec3 s=mix(nightSky,daySky,uDayFactor);
+      vec3 su=normalize(uSun);
+      float sd=max(dot(d,su),0.);
+      vec3 sunColor=mix(vec3(.15,.15,.3),vec3(1,.95,.8),uDayFactor);
+      s+=sunColor*pow(sd,1024.)*1.5*uDayFactor;
+      s+=sunColor*pow(sd,64.)*.2*uDayFactor;
+      s+=mix(vec3(.6,.6,.8),vec3(1,.85,.6),uDayFactor)*pow(sd,4.)*.15*uDayFactor;
+      if(d.y<0.)s=mix(s,vec3(.2,.3,.15)*uDayFactor,smoothstep(0.0,-.15,d.y));
+      gl_FragColor=vec4(s,1.);
+    }`,
+});
+skyMatProcedural.uniforms.uDayFactor = { value: 1.0 };
+
+const skyGeo = new THREE.SphereGeometry(3500, 32, 32);
+const sky = new THREE.Mesh(skyGeo, skyMatProcedural);
 scene.add(sky);
+
+// Try loading AI-generated equirectangular skybox texture
+let skyboxLoaded = false;
+const skyboxLoader = new THREE.TextureLoader();
+skyboxLoader.load(
+  'assets/textures/skybox-equi.png',
+  (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // Equirectangular: sphere UVs map naturally (u=longitude, v=latitude)
+    const skyboxMat = new THREE.MeshBasicMaterial({
+      map: tex,
+      side: THREE.BackSide,
+    });
+    sky.material = skyboxMat;
+    skyboxLoaded = true;
+    console.log('Skybox texture loaded');
+  },
+  undefined,
+  () => { console.log('Skybox texture unavailable — using procedural sky'); }
+);
 
 // ─── Lighting ─────────────────────────────────────────────────────
 const ambientLight = new THREE.AmbientLight(0x6688aa, 0.6);
@@ -247,7 +268,10 @@ function updateDayNight(dt) {
   const raw = Math.sin(dayTime * Math.PI * 2 - Math.PI / 2);
   dayFactor = Math.max(0.05, Math.min(1, (raw + 1) / 2));
 
-  sky.material.uniforms.uDayFactor.value = dayFactor;
+  // Procedural sky has day uniform; skybox texture does not
+  if (sky.material.uniforms?.uDayFactor) {
+    sky.material.uniforms.uDayFactor.value = dayFactor;
+  }
   sun.intensity = dayFactor * 2.0;
   ambientLight.intensity = 0.2 + dayFactor * 0.5;
   hemiLight.intensity = 0.1 + dayFactor * 0.4;

@@ -92,8 +92,11 @@ export function setupControls(plane) {
     if (!gyroOn) return;
     // beta: -180 to 180 (front/back), gamma: -90 to 90 (left/right)
     // Center around 45 degrees (phone held at angle)
-    gyroBeta = Math.max(-30, Math.min(30, (e.beta || 0) - 45)) / 30;
-    gyroGamma = Math.max(-30, Math.min(30, e.gamma || 0)) / 30;
+    // Increased sensitivity: map ±20° phone tilt to full ±1 control range
+    const betaRaw = (e.beta || 0) - 45;
+    const gammaRaw = e.gamma || 0;
+    gyroBeta = Math.max(-1, Math.min(1, betaRaw / 20));
+    gyroGamma = Math.max(-1, Math.min(1, gammaRaw / 20));
   });
 
   // Keyboard
@@ -113,7 +116,7 @@ export function setupControls(plane) {
 
 export function applyControls(plane, controls, dt) {
   const { joy, keys, gyroBeta, gyroGamma, gyroOn } = controls;
-  const pitchSpeed = 1.5, rollSpeed = 2.0, yawSpeed = 1.0;
+  const pitchSpeed = 2.0, rollSpeed = 3.5, yawSpeed = 1.5;
 
   // Keyboard
   if (keys['KeyW']) plane.pitch -= pitchSpeed * dt;
@@ -131,18 +134,19 @@ export function applyControls(plane, controls, dt) {
   plane.yaw += joy.r.x * yawSpeed * 1.5 * dt;
   plane.pitch += joy.r.y * pitchSpeed * 1.2 * dt;
 
-  // Gyroscope
+  // Gyroscope — direct input, no spring-back fighting the pilot
   if (gyroOn) {
-    plane.pitch += (gyroBeta * 0.6 - plane.pitch * 0.3) * dt;
-    plane.roll += (gyroGamma * 0.8 - plane.roll * 0.3) * dt;
+    plane.pitch += gyroBeta * pitchSpeed * 1.2 * dt;
+    plane.roll += gyroGamma * rollSpeed * 1.2 * dt;
   }
 
-  // Auto-stabilize (gentle return to level)
-  plane.pitch *= Math.pow(0.97, dt * 60);
-  plane.roll *= Math.pow(0.96, dt * 60);
-  plane.yaw *= Math.pow(0.99, dt * 60);
+  // Very gentle damping only — preserves player attitude, prevents infinite drift
+  // Decay is slow enough that sustained input easily overcomes it
+  plane.pitch *= Math.pow(0.995, dt * 60);
+  plane.roll *= Math.pow(0.993, dt * 60);
+  plane.yaw *= Math.pow(0.998, dt * 60);
 
-  // Clamp
-  plane.pitch = Math.max(-1.2, Math.min(1.2, plane.pitch));
-  plane.roll = Math.max(-1.0, Math.min(1.0, plane.roll));
+  // Generous clamps: allow barrel rolls (±π roll), steep climbs/dives
+  plane.pitch = Math.max(-1.5, Math.min(1.5, plane.pitch));
+  plane.roll = Math.max(-3.14, Math.min(3.14, plane.roll));
 }
