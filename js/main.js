@@ -1,19 +1,30 @@
 import * as THREE from 'three';
 import SimplexNoise from './noise.js';
-import { height, terrainColor, updateChunks } from './terrain.js';
+import { height, updateChunks } from './terrain.js';
 import { setupControls, applyControls } from './controls.js';
+import { initAudio, resumeAudio, updateAudio, playRingCollect, loadAudioAssets, playSound, playThunder, getAudioStatus } from './audio.js';
+import { createHUD, updateHUD as updateGameHUD } from './hud.js';
+import { generateMission, checkRingCollision, updateRings } from './missions.js';
+import { initWeather, setRain, updateWeather, getFogDensity, isRaining } from './weather.js';
 
-// Scene setup
+// ─── Scene ───────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 1, 8000);
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
-document.body.insertBefore(renderer.domElement, document.body.firstChild);
+let renderer = null;
+let rendererError = null;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
+  document.body.insertBefore(renderer.domElement, document.body.firstChild);
+} catch (e) {
+  rendererError = e;
+  console.error('WebGL unavailable:', e.message);
+}
 
-// Sky
+// ─── Sky ──────────────────────────────────────────────────────────
 const skyUniforms = { uSun: { value: new THREE.Vector3(500, 300, -800) } };
 const sky = new THREE.Mesh(
   new THREE.SphereGeometry(3500, 32, 32),
@@ -21,19 +32,42 @@ const sky = new THREE.Mesh(
     side: THREE.BackSide,
     uniforms: skyUniforms,
     vertexShader: 'varying vec3 vp;void main(){vp=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader: 'uniform vec3 uSun;varying vec3 vp;void main(){vec3 d=normalize(vp);float y=d.y*.5+.5;vec3 s=mix(vec3(.75,.82,.92),vec3(.35,.55,.85),smoothstep(0,.3,y));s=mix(s,vec3(.12,.18,.45),smoothstep(.3,.8,y));s=mix(s,vec3(.85,.88,.92),exp(-pow(y*3.,2.))*.5);vec3 su=normalize(uSun);float sd=max(dot(d,su),0.);s+=vec3(1,.95,.8)*pow(sd,256.)*3.;s+=vec3(1,.95,.8)*pow(sd,16.)*.3;s+=vec3(1,.85,.6)*pow(sd,4.)*.15;if(d.y<0.)s=mix(s,vec3(.2,.3,.15),smoothstep(0,-.15,d.y));gl_FragColor=vec4(s,1.);}'
+    fragmentShader: `
+      uniform vec3 uSun;
+      uniform float uDayFactor;
+      varying vec3 vp;
+      void main(){
+        vec3 d=normalize(vp);
+        float y=d.y*.5+.5;
+        vec3 daySky=mix(vec3(.75,.82,.92),vec3(.35,.55,.85),smoothstep(0.0,.3,y));
+        daySky=mix(daySky,vec3(.12,.18,.45),smoothstep(.3,.8,y));
+        daySky=mix(daySky,vec3(.85,.88,.92),exp(-pow(y*3.,2.))*.5);
+        vec3 nightSky=mix(vec3(.04,.04,.1),vec3(.02,.02,.08),smoothstep(0.0,.6,y));
+        vec3 s=mix(nightSky,daySky,uDayFactor);
+        vec3 su=normalize(uSun);
+        float sd=max(dot(d,su),0.);
+        vec3 sunColor=mix(vec3(.15,.15,.3),vec3(1,.95,.8),uDayFactor);
+        s+=sunColor*pow(sd,1024.)*1.5*uDayFactor;
+        s+=sunColor*pow(sd,64.)*.2*uDayFactor;
+        s+=mix(vec3(.6,.6,.8),vec3(1,.85,.6),uDayFactor)*pow(sd,4.)*.15*uDayFactor;
+        if(d.y<0.)s=mix(s,vec3(.2,.3,.15)*uDayFactor,smoothstep(0.0,-.15,d.y));
+        gl_FragColor=vec4(s,1.);
+      }`,
   })
 );
+sky.material.uniforms.uDayFactor = { value: 1.0 };
 scene.add(sky);
 
-// Lighting
-scene.add(new THREE.AmbientLight(0x6688aa, 0.6));
+// ─── Lighting ─────────────────────────────────────────────────────
+const ambientLight = new THREE.AmbientLight(0x6688aa, 0.6);
+scene.add(ambientLight);
 const sun = new THREE.DirectionalLight(0xffeedd, 1.8);
 sun.position.set(500, 300, -800);
 scene.add(sun);
-scene.add(new THREE.HemisphereLight(0x88aacc, 0x445522, 0.4));
+const hemiLight = new THREE.HemisphereLight(0x88aacc, 0x445522, 0.4);
+scene.add(hemiLight);
 
-// Water
+// ─── Water ────────────────────────────────────────────────────────
 const waterMat = new THREE.MeshPhongMaterial({ color: 0x1a4a6a, transparent: true, opacity: 0.7, shininess: 100, specular: 0x4488aa });
 const water = new THREE.Mesh(new THREE.PlaneGeometry(10000, 10000), waterMat);
 water.rotation.x = -Math.PI / 2;
@@ -41,27 +75,30 @@ water.position.y = -5;
 scene.add(water);
 scene.fog = new THREE.FogExp2(0x8899bb, 0.00055);
 
-// Clouds
+// ─── Clouds ───────────────────────────────────────────────────────
 const cloudGroup = new THREE.Group();
 scene.add(cloudGroup);
 const clouds = [];
-for (let i = 0; i < 60; i++) {
+const cloudGeometry = new THREE.SphereGeometry(1, 12, 8);
+const cloudMaterials = [0.55, 0.63, 0.7].map(opacity => new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity, depthWrite: false }));
+for (let i = 0; i < 48; i++) {
   const g = new THREE.Group();
   const n = 3 + Math.floor(Math.random() * 5);
   for (let j = 0; j < n; j++) {
-    const s = 15 + Math.random() * 30;
-    const p = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 + Math.random() * 0.2 }));
+    const s = 10 + Math.random() * 20;
+    const p = new THREE.Mesh(cloudGeometry, cloudMaterials[Math.floor(Math.random() * cloudMaterials.length)]);
     p.position.set((Math.random() - 0.5) * 50, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 30);
     p.scale.y = 0.4 + Math.random() * 0.2;
+    p.scale.multiplyScalar(s);
     g.add(p);
   }
-  g.position.set((Math.random() - 0.5) * 2000, 80 + Math.random() * 120, (Math.random() - 0.5) * 2000);
+  g.position.set((Math.random() - 0.5) * 2000, 180 + Math.random() * 180, (Math.random() - 0.5) * 2000);
   g.userData = { sp: 2 + Math.random() * 5, dr: (Math.random() - 0.5) * 3 };
   cloudGroup.add(g);
   clouds.push(g);
 }
 
-// Aircraft
+// ─── Aircraft ─────────────────────────────────────────────────────
 const aircraft = new THREE.Group();
 const fuselageMat = new THREE.MeshPhongMaterial({ color: 0xe8e8e8, shininess: 60 });
 const wingMat = new THREE.MeshPhongMaterial({ color: 0xcc4444, shininess: 40 });
@@ -95,9 +132,9 @@ prop.position.z = -5;
 aircraft.add(prop);
 scene.add(aircraft);
 
-// Flight state
+// ─── Flight State ─────────────────────────────────────────────────
 const plane = {
-  position: new THREE.Vector3(0, 100, 0),
+  position: new THREE.Vector3(0, 220, 0),
   velocity: new THREE.Vector3(0, 0, -80),
   quaternion: new THREE.Quaternion(),
   pitch: 0,
@@ -107,16 +144,90 @@ const plane = {
   speed: 80,
 };
 
-// Setup controls
+// ─── Controls ─────────────────────────────────────────────────────
 const controls = setupControls(plane);
 
-// HUD
+// ─── Audio (loaded on user gesture) ───────────────────────────────
+let audioReady = false;
+loadAudioAssets();
+
+// Thunder sound from weather lightning
+window.addEventListener('skydrifter-thunder', () => {
+  if (!audioReady) return;
+  playThunder();
+});
+
+// ─── Weather ──────────────────────────────────────────────────────
+initWeather(scene);
+let weatherToggleOn = false;
+const weatherBtn = document.createElement('button');
+weatherBtn.id = 'weather-btn';
+weatherBtn.textContent = 'WX';
+weatherBtn.type = 'button';
+weatherBtn.setAttribute('aria-label', 'Toggle rain');
+weatherBtn.setAttribute('aria-pressed', 'false');
+weatherBtn.addEventListener('click', () => {
+  weatherToggleOn = !weatherToggleOn;
+  weatherBtn.classList.toggle('on', weatherToggleOn);
+  weatherBtn.setAttribute('aria-pressed', String(weatherToggleOn));
+  setRain(weatherToggleOn);
+  if (weatherToggleOn && window.audioAssets?.thunder) {
+    playSound(window.audioAssets.thunder, 0.3);
+  }
+});
+document.body.appendChild(weatherBtn);
+
+// ─── Accessibility ────────────────────────────────────────────────
+const a11yBtn = document.createElement('button');
+a11yBtn.id = 'a11y-btn';
+a11yBtn.textContent = 'HC';
+a11yBtn.type = 'button';
+a11yBtn.setAttribute('aria-label', 'Toggle high contrast');
+a11yBtn.setAttribute('aria-pressed', 'false');
+a11yBtn.addEventListener('click', () => {
+  document.body.classList.toggle('high-contrast');
+  a11yBtn.classList.toggle('on');
+  a11yBtn.setAttribute('aria-pressed', String(document.body.classList.contains('high-contrast')));
+});
+document.body.appendChild(a11yBtn);
+
+// ─── Mission Flash ────────────────────────────────────────────────
+const missionFlash = document.createElement('div');
+missionFlash.id = 'mission-flash';
+missionFlash.innerHTML = '<h2>MISSION COMPLETE</h2>';
+document.body.appendChild(missionFlash);
+let missionFlashTimer = 0;
+
+// ─── Missions ─────────────────────────────────────────────────────
+let score = 0;
+let missionLevel = 0;
+let missionRings = [];
+let missionObjects = []; // Three.js objects to remove on reset
+const hud = createHUD();
+
+function startMission() {
+  // Clean old mission
+  for (const obj of missionObjects) { scene.remove(obj); }
+  missionObjects = [];
+  missionRings = [];
+
+  const count = 5 + missionLevel * 3;
+  const rings = generateMission(plane.position, count);
+  missionRings = rings;
+  for (const ring of rings) {
+    scene.add(ring);
+    missionObjects.push(ring);
+  }
+  updateGameHUD(hud, plane, score, missionRings, missionRings.length);
+}
+
+// ─── Basic HUD (alt, spd, compass) ────────────────────────────────
 const altEl = document.getElementById('alt');
 const spdEl = document.getElementById('spd');
 const cmpEl = document.getElementById('compass');
 const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
-function updateHUD() {
+function updateBasicHUD() {
   altEl.textContent = 'Alt ' + Math.max(0, plane.position.y + 5).toFixed(0) + 'm';
   spdEl.textContent = 'Spd ' + Math.abs(plane.speed * 3.6).toFixed(0) + 'km/h';
   const d = Math.atan2(-plane.velocity.x, -plane.velocity.z);
@@ -125,58 +236,90 @@ function updateHUD() {
   cmpEl.textContent = dirs[idx] + ' ' + Math.round(deg) + '°';
 }
 
-// Resize
+// ─── Day/Night Cycle ──────────────────────────────────────────────
+let dayFactor = 1.0;
+let dayTime = 0.5; // begin at noon; 0..1 over a full cycle
+
+function updateDayNight(dt) {
+  // Full cycle = 120 seconds for gameplay pacing
+  dayTime = (dayTime + dt / 120) % 1;
+  // Smooth sine: 0=midnight, 0.25=sunrise, 0.5=noon, 0.75=sunset
+  const raw = Math.sin(dayTime * Math.PI * 2 - Math.PI / 2);
+  dayFactor = Math.max(0.05, Math.min(1, (raw + 1) / 2));
+
+  sky.material.uniforms.uDayFactor.value = dayFactor;
+  sun.intensity = dayFactor * 2.0;
+  ambientLight.intensity = 0.2 + dayFactor * 0.5;
+  hemiLight.intensity = 0.1 + dayFactor * 0.4;
+
+  // Fog color shifts
+  const fogR = 0.02 + dayFactor * 0.52;
+  const fogG = 0.02 + dayFactor * 0.56;
+  const fogB = 0.06 + dayFactor * 0.66;
+  scene.fog.color.setRGB(fogR, fogG, fogB);
+}
+
+// ─── Resize ───────────────────────────────────────────────────────
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer?.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Game loop
+// ─── Game Loop ────────────────────────────────────────────────────
 let go = false, t0 = performance.now(), chunkTimer = 0;
 const chunks = new Map();
+let gameTime = 0;
 
 function loop() {
   requestAnimationFrame(loop);
   const now = performance.now();
   const dt = Math.min((now - t0) / 1000, 0.05);
   t0 = now;
-  
-  if (!go) { renderer.render(scene, camera); return; }
-  
-  // Apply controls
+
+  if (!go) { if (renderer) renderer.render(scene, camera); return; }
+
+  gameTime += dt;
+
+  // ── Controls ──
   applyControls(plane, controls, dt);
-  
-  // Physics
+
+  // ── Physics ──
   const targetSpeed = 30 + plane.throttle * 150;
   plane.speed += (targetSpeed - plane.speed) * dt * 0.5;
-  
+
   const euler = new THREE.Euler(plane.pitch, plane.yaw, plane.roll, 'YXZ');
   const targetQuat = new THREE.Quaternion().setFromEuler(euler);
   plane.quaternion.slerp(targetQuat, dt * 3);
-  
+
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
   plane.velocity.copy(forward.multiplyScalar(plane.speed));
   plane.velocity.y += Math.max(0, -plane.pitch * plane.speed * 0.5) * dt - 0.3 * dt;
   plane.position.add(plane.velocity.clone().multiplyScalar(dt));
-  
+
+  // Terrain collision
   const terrainHeight = height(plane.position.x, plane.position.z);
   const minAlt = Math.max(terrainHeight + 10, -5 + 5);
-  if (plane.position.y < minAlt) { plane.position.y = minAlt; plane.pitch = Math.max(0, plane.pitch * 0.5 - 0.1); }
-  
+  if (plane.position.y < minAlt) {
+    plane.position.y = minAlt;
+    plane.pitch = Math.max(0, plane.pitch * 0.5 - 0.1);
+  }
+
+  // ── Aircraft visual ──
   aircraft.position.copy(plane.position);
   aircraft.quaternion.copy(plane.quaternion);
   prop.rotation.z += plane.throttle * 30 * dt;
-  
+
+  // Camera follow with smooth lerp
   const camOffset = new THREE.Vector3(0, 3, 12).applyQuaternion(plane.quaternion);
   camera.position.lerp(plane.position.clone().add(camOffset), dt * 4);
   camera.lookAt(plane.position.clone().add(new THREE.Vector3(0, 0, -30).applyQuaternion(plane.quaternion)));
-  
-  // Update chunks
+
+  // ── Terrain chunks ──
   chunkTimer += dt;
   if (chunkTimer > 0.2) { updateChunks(scene, chunks, plane.position); chunkTimer = 0; }
-  
-  // Update clouds
+
+  // ── Clouds ──
   for (const cloud of clouds) {
     cloud.position.x += cloud.userData.sp * dt;
     cloud.position.z += cloud.userData.dr * dt;
@@ -187,21 +330,98 @@ function loop() {
     if (dz > wrap) cloud.position.z -= wrap * 2;
     if (dz < -wrap) cloud.position.z += wrap * 2;
   }
-  
+
+  // ── Sky / water follow ──
   sky.position.set(plane.position.x, 0, plane.position.z);
   water.position.x = plane.position.x;
   water.position.z = plane.position.z;
   waterMat.opacity = 0.65 + Math.sin(now * 0.001) * 0.05;
-  
-  updateHUD();
-  renderer.render(scene, camera);
+
+  // ── Day/Night ──
+  updateDayNight(dt);
+
+  // ── Weather ──
+  updateWeather(dt, plane.position);
+  scene.fog.density = getFogDensity();
+
+  // ── Missions ──
+  if (missionRings.length > 0) {
+    updateRings(missionRings, gameTime);
+    const points = checkRingCollision(plane, missionRings);
+    if (points > 0) {
+      score += points;
+      if (audioReady && window.audioAssets?.ringChime) {
+        playSound(window.audioAssets.ringChime, 0.2);
+      } else {
+        playRingCollect();
+      }
+    }
+
+    const collected = missionRings.filter(r => r.userData.collected).length;
+    if (collected === missionRings.length && !missionFlash.classList.contains('show')) {
+      missionLevel++;
+      score += 500 * missionLevel; // bonus
+      missionFlash.classList.add('show');
+      missionFlashTimer = 2;
+      if (audioReady && window.audioAssets?.boost) {
+        playSound(window.audioAssets.boost, 0.3);
+      }
+      setTimeout(() => { if (go) startMission(); }, 2000);
+    }
+    updateGameHUD(hud, plane, score, missionRings, missionRings.length);
+  }
+
+  // ── HUD ──
+  updateBasicHUD();
+
+  // ── Mission flash timer ──
+  if (missionFlashTimer > 0) {
+    missionFlashTimer -= dt;
+    if (missionFlashTimer <= 0) {
+      missionFlash.classList.remove('show');
+    }
+  }
+
+  // ── Audio ──
+  if (audioReady) {
+    updateAudio(plane.throttle, plane.speed, plane.pitch);
+  }
+
+  if (renderer) renderer.render(scene, camera);
 }
 
-// Start button
+// ─── Start Button (user gesture → audio unlock) ───────────────────
 document.getElementById('go-btn').addEventListener('click', () => {
+  if (rendererError) {
+    const splash = document.getElementById('splash');
+    splash.querySelector('p').textContent = 'WebGL could not start. Enable hardware acceleration or try a current browser.';
+    splash.classList.add('error');
+    return;
+  }
   document.getElementById('splash').classList.add('out');
   go = true;
+
+  // Initialize audio on user gesture
+  initAudio();
+  resumeAudio();
+  audioReady = true;
+
+  // Start the first mission relative to takeoff, not page load.
+  setTimeout(() => { if (go && missionRings.length === 0) startMission(); }, 1500);
 });
 
-// Start loop
+// Read-only test/agent surface for validating behavior without visual guessing.
+window.skyDrifterDebug = {
+  getState: () => ({
+    flying: go,
+    score,
+    missionRings: missionRings.length,
+    collectedRings: missionRings.filter(ring => ring.userData.collected).length,
+    gyroEnabled: controls.gyroOn,
+    raining: isRaining(),
+    audio: getAudioStatus(),
+  }),
+};
+
+// ─── Start Loop ───────────────────────────────────────────────────
 loop();

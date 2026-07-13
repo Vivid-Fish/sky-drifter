@@ -2,8 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#0a0f1e" />
     <title>Sky Drifter</title>
     <link rel="stylesheet" href="css/style.css" />
   </head>
@@ -15,19 +16,21 @@
         <div><b>W/S</b> Pitch</div>
         <div><b>A/D</b> Roll</div>
         <div><b>Q/E</b> Yaw</div>
-        <div><b>&uarr;</b> Throttle &uarr;</div>
-        <div><b>Space</b> Throttle &darr;</div>
+        <div><b>Shift</b> Throttle ↑</div>
+        <div><b>Space</b> Throttle ↓</div>
       </div>
-      <button id="go-btn">Take Flight</button>
+      <button id="go-btn" type="button">Take Flight</button>
     </div>
 
-    <div id="hud"><div id="alt">Alt &mdash;</div><div id="spd">Spd &mdash;</div></div>
-    <div id="compass">N 0&deg;</div>
+    <!-- Basic HUD: altitude, speed, compass -->
+    <div id="hud"><div id="alt">Alt —</div><div id="spd">Spd —</div></div>
+    <div id="compass">N 0°</div>
 
+    <!-- Mobile touch controls -->
     <div class="joystick-zone" id="stick-left"><div class="joystick-base"></div><div class="joystick-thumb" id="thumb-l"></div><div class="joystick-label">PITCH / ROLL</div></div>
     <div class="joystick-zone" id="stick-right"><div class="joystick-base"></div><div class="joystick-thumb" id="thumb-r"></div><div class="joystick-label">YAW / PITCH</div></div>
-    <div id="throttle-bar"><div id="throttle-fill" style="height:50%"></div><div id="throttle-label">THR</div></div>
-    <button id="gyro-btn">GYRO</button>
+    <div id="throttle-bar"><div id="throttle-fill"></div><div id="throttle-label">THR</div></div>
+    <button id="gyro-btn" type="button" aria-pressed="false">GYRO</button>
 
     <script type="importmap">
       {"imports":{"three":"https://unpkg.com/three@0.163.0/build/three.module.js"}}

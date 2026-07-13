@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import SimplexNoise from './noise.js';
 
 const n1 = new SimplexNoise(42);
@@ -21,6 +22,21 @@ export function terrainColor(h) {
   return new THREE.Color(0.92, 0.94, 0.97);
 }
 
+// Load alpine terrain texture (optional enhancement)
+let terrainTexture = null;
+const textureLoader = new THREE.TextureLoader();
+textureLoader.load(
+  'assets/textures/alpine-terrain.png',
+  (tex) => {
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4, 4);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    terrainTexture = tex;
+  },
+  undefined,
+  () => { /* texture load failed — use procedural colors only */ }
+);
+
 export function createChunk(cx, cz) {
   const g = new THREE.PlaneGeometry(200, 200, 60, 60);
   g.rotateX(-Math.PI / 2);
@@ -36,7 +52,26 @@ export function createChunk(cx, cz) {
   }
   g.computeVertexNormals();
   g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  if (terrainTexture) {
+    mat.map = terrainTexture;
+    // Three normally multiplies map color directly into the procedural vertex
+    // color. Treat the generated alpine image as subtle surface detail instead,
+    // preserving readable terrain lighting and elevation colors.
+    mat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#ifdef USE_MAP
+          vec4 sampledDiffuseColor = texture2D(map, vMapUv);
+          vec3 alpineDetail = clamp(sampledDiffuseColor.rgb * 1.5, vec3(0.65), vec3(1.35));
+          diffuseColor.rgb *= mix(vec3(1.0), alpineDetail, 0.22);
+          diffuseColor.a *= sampledDiffuseColor.a;
+        #endif`
+      );
+    };
+  }
+  const m = new THREE.Mesh(g, mat);
   m.position.set(cx * 200, 0, cz * 200);
   return m;
 }
