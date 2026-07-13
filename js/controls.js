@@ -1,4 +1,5 @@
 // Touch joystick, gyro, keyboard, and mouse controls
+import { createHoldSource } from './hold-source.js';
 export function setupControls(plane) {
   const joy = { l: { x: 0, y: 0, active: false }, r: { x: 0, y: 0, active: false } };
   const DEADZONE = 0.12; // ignore small joystick drift
@@ -99,7 +100,10 @@ export function setupControls(plane) {
     gyroGamma = Math.max(-1, Math.min(1, gammaRaw / 20));
   });
 
-  // Keyboard
+  // ─── Keyboard (global) ──────────────────────────────────────────
+  // keys maps code -> boolean.  keyup uses capture=true so it always
+  // fires even when a focused element (e.g. boost button) calls
+  // stopPropagation() on the bubble phase.
   const keys = {};
   const handledKeys = new Set(['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight', 'Space']);
   window.addEventListener('keydown', (e) => {
@@ -107,10 +111,85 @@ export function setupControls(plane) {
     keys[e.code] = true;
     e.preventDefault();
   });
-  window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+  window.addEventListener('keyup', (e) => {
+    if (handledKeys.has(e.code)) keys[e.code] = false;
+  }, { capture: true });
 
-  // Return a mutable controls object so gyro values stay in sync
-  const ctrl = { joy, keys, get gyroOn() { return gyroOn; }, get gyroBeta() { return gyroBeta; }, get gyroGamma() { return gyroGamma; } };
+  // ─── Global cleanup (blur / page-hide) ──────────────────────────
+  function clearAllInput() {
+    for (const k of handledKeys) keys[k] = false;
+    boostHold.clearAll();
+    if (boostBtn) {
+      boostBtn.classList.remove('on');
+      boostBtn.removeAttribute('aria-pressed');
+    }
+  }
+  window.addEventListener('blur', clearAllInput);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearAllInput();
+  });
+
+  // ─── Boost button ───────────────────────────────────────────────
+  // Independent sources via hold-source tracker.
+  const boostHold = createHoldSource();
+  const boostBtn = document.getElementById('boost-btn');
+  if (boostBtn) {
+    // Remove aria-pressed (hold is not a toggle); set accessible label.
+    boostBtn.removeAttribute('aria-pressed');
+    boostBtn.setAttribute('aria-label', 'Hold to boost');
+
+    function syncBoostVisual() {
+      boostBtn.classList.toggle('on', boostHold.active);
+    }
+
+    // Pointer events — each pointer tracked independently
+    boostBtn.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') e.preventDefault();
+      boostHold.addPointer(e.pointerId);
+      boostBtn.setPointerCapture(e.pointerId);
+      syncBoostVisual();
+    });
+    function releasePointer(id) {
+      boostHold.removePointer(id);
+      syncBoostVisual();
+    }
+    boostBtn.addEventListener('pointerup', (e) => releasePointer(e.pointerId));
+    boostBtn.addEventListener('pointercancel', (e) => releasePointer(e.pointerId));
+    boostBtn.addEventListener('lostpointercapture', (e) => releasePointer(e.pointerId));
+
+    // Keyboard hold on focused button — Space/Enter
+    boostBtn.addEventListener('keydown', (e) => {
+      if (e.code !== 'Space' && e.code !== 'Enter') return;
+      e.preventDefault();
+      e.stopPropagation();
+      boostHold.setKeyboard(true);
+      syncBoostVisual();
+    });
+    boostBtn.addEventListener('keyup', (e) => {
+      if (e.code !== 'Space' && e.code !== 'Enter') return;
+      e.preventDefault();
+      e.stopPropagation();
+      boostHold.setKeyboard(false);
+      syncBoostVisual();
+    });
+    // Blur releases only the keyboard-held source, not active pointers.
+    boostBtn.addEventListener('blur', () => {
+      boostHold.setKeyboard(false);
+      syncBoostVisual();
+    });
+  }
+
+  // ─── Controls object ────────────────────────────────────────────
+  const ctrl = {
+    joy,
+    keys,
+    get gyroOn() { return gyroOn; },
+    get gyroBeta() { return gyroBeta; },
+    get gyroGamma() { return gyroGamma; },
+    get boostOn() {
+      return keys['ShiftLeft'] || keys['ShiftRight'] || boostHold.active;
+    },
+  };
   return ctrl;
 }
 
@@ -125,7 +204,6 @@ export function applyControls(plane, controls, dt) {
   if (keys['KeyD']) plane.roll += rollSpeed * dt;
   if (keys['KeyQ']) plane.yaw += yawSpeed * dt;
   if (keys['KeyE']) plane.yaw -= yawSpeed * dt;
-  if (keys['ShiftLeft'] || keys['ShiftRight']) plane.throttle = Math.min(1, plane.throttle + 0.5 * dt);
   if (keys['Space']) plane.throttle = Math.max(0, plane.throttle - 0.5 * dt);
 
   // Touch joystick - left stick: pitch/roll, right stick: yaw/pitch

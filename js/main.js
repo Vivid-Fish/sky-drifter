@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import SimplexNoise from './noise.js';
 import { height, updateChunks } from './terrain.js';
 import { setupControls, applyControls } from './controls.js';
-import { initAudio, resumeAudio, updateAudio, playRingCollect, loadAudioAssets, playSound, playThunder, getAudioStatus } from './audio.js';
-import { createHUD, updateHUD as updateGameHUD } from './hud.js';
+import { initAudio, resumeAudio, updateAudio, playRingCollect, loadAudioAssets, playSound, playThunder, getAudioStatus, audioAssets } from './audio.js';
+import { createHUD, updateHUD as updateGameHUD, createBoostBar, updateBoostBar } from './hud.js';
 import { generateMission, checkRingCollision, updateRings } from './missions.js';
 import { initWeather, setRain, updateWeather, getFogDensity, isRaining } from './weather.js';
+import { update as updateBoost } from './boost.js';
+import { stepSpeed } from './flight-physics.js';
 
 // ─── Scene ───────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -192,8 +194,8 @@ weatherBtn.addEventListener('click', () => {
   weatherBtn.classList.toggle('on', weatherToggleOn);
   weatherBtn.setAttribute('aria-pressed', String(weatherToggleOn));
   setRain(weatherToggleOn);
-  if (weatherToggleOn && window.audioAssets?.thunder) {
-    playSound(window.audioAssets.thunder, 0.3);
+  if (weatherToggleOn && audioAssets?.thunder) {
+    playSound(audioAssets.thunder, 0.3);
   }
 });
 document.body.appendChild(weatherBtn);
@@ -211,6 +213,9 @@ a11yBtn.addEventListener('click', () => {
   a11yBtn.setAttribute('aria-pressed', String(document.body.classList.contains('high-contrast')));
 });
 document.body.appendChild(a11yBtn);
+
+// ─── Boost Bar ────────────────────────────────────────────────────
+const boostBar = createBoostBar('boost-bar');
 
 // ─── Mission Flash ────────────────────────────────────────────────
 const missionFlash = document.createElement('div');
@@ -294,6 +299,7 @@ window.addEventListener('resize', () => {
 let go = false, t0 = performance.now(), chunkTimer = 0;
 const chunks = new Map();
 let gameTime = 0;
+let boostResult = { active: false, energy: 100, multiplier: 1, activated: false };
 
 function loop() {
   requestAnimationFrame(loop);
@@ -308,9 +314,16 @@ function loop() {
   // ── Controls ──
   applyControls(plane, controls, dt);
 
+  // ── Boost ──
+  boostResult = updateBoost(dt, controls.boostOn);
+
   // ── Physics ──
-  const targetSpeed = 30 + plane.throttle * 150;
-  plane.speed += (targetSpeed - plane.speed) * dt * 0.5;
+  plane.speed = stepSpeed(plane.speed, plane.throttle, boostResult.multiplier, dt);
+
+  // Play boost activation sound on edge
+  if (boostResult.activated && audioReady && audioAssets?.boost) {
+    playSound(audioAssets.boost, 0.25);
+  }
 
   const euler = new THREE.Euler(plane.pitch, plane.yaw, plane.roll, 'YXZ');
   const targetQuat = new THREE.Quaternion().setFromEuler(euler);
@@ -374,8 +387,8 @@ function loop() {
     const points = checkRingCollision(plane, missionRings);
     if (points > 0) {
       score += points;
-      if (audioReady && window.audioAssets?.ringChime) {
-        playSound(window.audioAssets.ringChime, 0.2);
+      if (audioReady && audioAssets?.ringChime) {
+        playSound(audioAssets.ringChime, 0.2);
       } else {
         playRingCollect();
       }
@@ -387,8 +400,8 @@ function loop() {
       score += 500 * missionLevel; // bonus
       missionFlash.classList.add('show');
       missionFlashTimer = 2;
-      if (audioReady && window.audioAssets?.boost) {
-        playSound(window.audioAssets.boost, 0.3);
+      if (audioReady && audioAssets?.boost) {
+        playSound(audioAssets.boost, 0.3);
       }
       setTimeout(() => { if (go) startMission(); }, 2000);
     }
@@ -397,6 +410,7 @@ function loop() {
 
   // ── HUD ──
   updateBasicHUD();
+  updateBoostBar(boostBar, boostResult);
 
   // ── Mission flash timer ──
   if (missionFlashTimer > 0) {
@@ -439,11 +453,13 @@ window.skyDrifterDebug = {
   getState: () => ({
     flying: go,
     score,
+    throttle: plane.throttle,
     missionRings: missionRings.length,
     collectedRings: missionRings.filter(ring => ring.userData.collected).length,
     gyroEnabled: controls.gyroOn,
     raining: isRaining(),
     audio: getAudioStatus(),
+    boost: { energy: Math.round(boostResult.energy), active: boostResult.active },
   }),
 };
 

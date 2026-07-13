@@ -24,6 +24,50 @@ export function createHUD() {
   };
 }
 
+// ─── Boost Energy Bar ─────────────────────────────────────────────
+// role=progressbar with aria-valuenow updated only on integer changes
+// to avoid 60fps attribute churn.  Per-instance last-value tracking.
+
+export function createBoostBar(id) {
+  const bar = document.createElement('div');
+  if (id) bar.id = id;
+  bar.classList.add('boost-bar');
+  bar.setAttribute('role', 'progressbar');
+  bar.setAttribute('aria-valuemin', '0');
+  bar.setAttribute('aria-valuemax', '100');
+  bar.setAttribute('aria-label', 'Boost energy');
+  bar.innerHTML = '<div class="boost-fill"></div><div class="boost-label">B</div>';
+  document.body.appendChild(bar);
+  bar.setAttribute('aria-valuenow', '100');
+
+  // Per-instance tracking object: root element + fill child + last value.
+  const boostBar = {
+    el: bar,
+    fill: bar.querySelector('.boost-fill'),
+    _lastValue: 100,
+  };
+  return boostBar;
+}
+
+export function updateBoostBar(boostBar, result) {
+  if (!boostBar) return;
+  const pct = result.energy / 100;
+  boostBar.fill.style.transform = `scaleY(${pct})`;
+
+  // Update accessible value only when integer changes
+  const intVal = Math.round(result.energy);
+  if (intVal !== boostBar._lastValue) {
+    boostBar.el.setAttribute('aria-valuenow', String(intVal));
+    boostBar._lastValue = intVal;
+  }
+
+  // Visual state classes
+  boostBar.fill.classList.toggle('empty', result.energy < 5);
+  // "boosting" class only when actually boosting (active=true),
+  // not when exhausted-but-held (active=false, requested=true).
+  boostBar.fill.classList.toggle('boosting', result.active);
+}
+
 export function updateHUD(hud, plane, score, rings, totalRings) {
   if (!hud) return;
 

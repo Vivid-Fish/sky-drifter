@@ -76,11 +76,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ── Run boost unit tests (deterministic, no browser) ──
+echo "Running boost unit tests..."
+cd "$(dirname "$0")"
+node test-boost.mjs
+UNIT_RESULT=$?
+if [ $UNIT_RESULT -ne 0 ]; then
+  echo "Unit tests failed, aborting browser tests"
+  exit $UNIT_RESULT
+fi
+
 # ── Run headed tests under Xvfb TCP ──
 echo "Running headed tests under Xvfb TCP (display :$DISPLAY_NUM)..."
 TEST_PORT="$HTTP_PORT" TEST_DIR="$TEST_DIR" ARTIFACT_DIR="$ARTIFACT_DIR" \
   DISPLAY="localhost:$DISPLAY_NUM" \
-  node test-offline.mjs
+  node "$(dirname "$0")/test-offline.mjs"
 RESULT=$?
 
 exit $RESULT

@@ -71,7 +71,7 @@ html = f'''<!doctype html>
 <div><b>W/S</b> Pitch</div>
 <div><b>A/D</b> Roll</div>
 <div><b>Q/E</b> Yaw</div>
-<div><b>Shift</b> Throttle ↑</div>
+<div><b>Shift</b> Boost</div>
 <div><b>Space</b> Throttle ↓</div>
 </div>
 <button id="go-btn" type="button">Take Flight</button>
@@ -81,6 +81,7 @@ html = f'''<!doctype html>
 <div class="joystick-zone" id="stick-left"><div class="joystick-base"></div><div class="joystick-thumb" id="thumb-l"></div><div class="joystick-label">PITCH / ROLL</div></div>
 <div class="joystick-zone" id="stick-right"><div class="joystick-base"></div><div class="joystick-thumb" id="thumb-r"></div><div class="joystick-label">YAW / PITCH</div></div>
 <div id="throttle-bar"><div id="throttle-fill"></div><div id="throttle-label">THR</div></div>
+<button id="boost-btn" type="button" aria-label="Hold to boost">BOOST</button>
 <button id="gyro-btn" type="button" aria-pressed="false">GYRO</button>
 <script type="module">
 {bundle}

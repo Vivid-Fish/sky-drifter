@@ -8,7 +8,6 @@ let themeSource = null;
 let started = false;
 
 export const audioAssets = {};
-window.audioAssets = audioAssets;
 
 // Raw array buffers loaded before AudioContext exists
 const rawBuffers = {};
