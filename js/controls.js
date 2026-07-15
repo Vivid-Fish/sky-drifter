@@ -197,25 +197,25 @@ export function applyControls(plane, controls, dt) {
   const { joy, keys, gyroBeta, gyroGamma, gyroOn } = controls;
   const pitchSpeed = 2.0, rollSpeed = 3.5, yawSpeed = 1.5;
 
-  // Keyboard — modify angular RATES, not angles directly
-  if (keys['KeyW']) plane.pitchRate -= pitchSpeed * dt;
-  if (keys['KeyS']) plane.pitchRate += pitchSpeed * dt;
-  if (keys['KeyA']) plane.rollRate += rollSpeed * dt;  // +A = left bank
-  if (keys['KeyD']) plane.rollRate -= rollSpeed * dt;  // +D = right bank
+  // Keyboard — rate commands (like real aircraft: stick deflection = target rate)
+  if (keys['KeyW']) plane.pitchRate -= pitchSpeed;
+  if (keys['KeyS']) plane.pitchRate += pitchSpeed;
+  if (keys['KeyA']) plane.rollRate += rollSpeed;   // A = left bank
+  if (keys['KeyD']) plane.rollRate -= rollSpeed;   // D = right bank
   if (keys['KeyQ']) plane.yaw += yawSpeed * dt;
   if (keys['KeyE']) plane.yaw -= yawSpeed * dt;
   if (keys['Space']) plane.throttle = Math.max(0, plane.throttle - 0.5 * dt);
 
   // Touch joystick - left stick: pitch/roll, right stick: yaw/pitch
-  plane.pitchRate -= joy.l.y * pitchSpeed * 1.5 * dt;
-  plane.rollRate -= joy.l.x * rollSpeed * 1.5 * dt;
-  plane.yaw += joy.r.x * yawSpeed * 1.5 * dt;
-  plane.pitchRate += joy.r.y * pitchSpeed * 1.2 * dt;
+  plane.pitchRate -= joy.l.y * pitchSpeed * 1.5;
+  plane.rollRate -= joy.l.x * rollSpeed * 1.5;
+  plane.yaw += joy.r.x * yawSpeed * dt;
+  plane.pitchRate += joy.r.y * pitchSpeed * 1.2;
 
-  // Gyroscope — direct input, no spring-back fighting the pilot
+  // Gyroscope — direct rate command
   if (gyroOn) {
-    plane.pitchRate += gyroBeta * pitchSpeed * 1.2 * dt;
-    plane.rollRate += gyroGamma * rollSpeed * 1.2 * dt;
+    plane.pitchRate += gyroBeta * pitchSpeed * 1.2;
+    plane.rollRate += gyroGamma * rollSpeed * 1.2;
   }
 
   // Aerodynamic damping on angular RATES only.
@@ -225,7 +225,6 @@ export function applyControls(plane, controls, dt) {
   plane.pitchRate *= Math.pow(0.995, dt * 60);
   plane.rollRate *= Math.pow(0.993, dt * 60);
 
-  // Clamp angles: allow barrel rolls (±π roll), steep climbs/dives
+  // Clamp pitch to prevent gimbal weirdness; roll is unbounded (barrel rolls)
   plane.pitch = Math.max(-1.5, Math.min(1.5, plane.pitch));
-  plane.roll = Math.max(-3.14, Math.min(3.14, plane.roll));
 }
