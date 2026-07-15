@@ -84,16 +84,16 @@ export function updateHUD(hud, plane, score, rings, totalRings) {
     hud.missionEl.textContent = 'Mission: Fly through ' + (totalRings - collected) + ' rings';
   }
 
-  // G-force
-  // Coordinated-turn approximation: level flight is 1 G; bank increases load.
-  const gForce = 1 / Math.max(0.25, Math.cos(Math.abs(plane.roll)));
+  // G-force — from real physics when available, fallback to roll-based
+  const phys = plane._physics;
+  const gForce = phys ? phys.gForce : (1 / Math.max(0.25, Math.cos(Math.abs(plane.roll))));
   hud.gEl.textContent = 'G: ' + Math.min(gForce, 9.9).toFixed(1);
 
-  // Stall warning (low speed + high pitch)
-  const isStalling = plane.speed < 40 && Math.abs(plane.pitch) > 0.5;
+  // Stall warning — driven by real AoA-based stall model
+  const isStalling = phys ? phys.isStalling : (plane.speed < 40 && Math.abs(plane.pitch) > 0.5);
   hud.stallEl.classList.toggle('hidden', !isStalling);
 
-  // Altitude warning
-  const alt = plane.position.y;
-  hud.altWarnEl.classList.toggle('hidden', alt > 20);
+  // Altitude warning — use terrain-relative altitude
+  const terrainAlt = plane.position.y;
+  hud.altWarnEl.classList.toggle('hidden', terrainAlt > 25);
 }

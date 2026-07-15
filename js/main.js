@@ -7,7 +7,7 @@ import { createHUD, updateHUD as updateGameHUD, createBoostBar, updateBoostBar }
 import { generateMission, checkRingCollision, updateRings } from './missions.js';
 import { initWeather, setRain, updateWeather, getFogDensity, isRaining } from './weather.js';
 import { update as updateBoost } from './boost.js';
-import { stepSpeed } from './flight-physics.js';
+import { stepPhysics, stepSpeed, computeAccelerations, getLiftCoefficient, PHYSICS } from './flight-physics.js';
 
 // ─── Scene ───────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -295,6 +295,31 @@ window.addEventListener('resize', () => {
   renderer?.setSize(window.innerWidth, window.innerHeight);
 });
 
+// ─── Stall Buffeting ─────────────────────────────────────────────
+// Visual shake effect when aircraft stalls — mimics airflow separation
+// Prior art: A2A Simulations (exaggerated buffeting for game feel),
+// SimShaker (stall → vibration), ArcadeAircraftPhysics (game-feel focus).
+const buffeting = { intensity: 0, targetIntensity: 0 };
+
+function updateBuffeting(dt, isStalling) {
+  // Ramp up quickly when stall begins, decay slowly when recovered
+  buffeting.targetIntensity = isStalling ? 1 : 0;
+  const rampUp = isStalling ? 8 : 3; // fast attack, slower release
+  buffeting.intensity += (buffeting.targetIntensity - buffeting.intensity) * dt * rampUp;
+  // Clamp to avoid floating point drift
+  buffeting.intensity = Math.max(0, Math.min(1, buffeting.intensity));
+}
+
+function applyBuffetShake(obj, time, intensity) {
+  if (intensity < 0.01) return; // skip when negligible
+  // High-frequency jitter: 40Hz-ish vibration (per game feel research)
+  const freq = 40;
+  const scale = intensity * 0.15; // max 0.15 radians/meters shake
+  obj.rotation.x += Math.sin(time * freq * Math.PI * 2) * scale * 0.3;
+  obj.rotation.z += Math.cos(time * freq * 1.7 * Math.PI * 2) * scale * 0.2;
+  obj.position.x += Math.sin(time * freq * 2.3 * Math.PI * 2) * scale * 0.5;
+}
+
 // ─── Game Loop ────────────────────────────────────────────────────
 let go = false, t0 = performance.now(), chunkTimer = 0;
 const chunks = new Map();
@@ -318,7 +343,11 @@ function loop() {
   boostResult = updateBoost(dt, controls.boostOn);
 
   // ── Physics ──
-  plane.speed = stepSpeed(plane.speed, plane.throttle, boostResult.multiplier, dt);
+  const terrainHeight = height(plane.position.x, plane.position.z);
+  const planeAlt = plane.position.y - terrainHeight;
+
+  const physics = stepPhysics(plane, planeAlt, boostResult.multiplier, dt);
+  plane.speed = physics.newSpeed;
 
   // Play boost activation sound on edge
   if (boostResult.activated && audioReady && audioAssets?.boost) {
@@ -331,25 +360,42 @@ function loop() {
 
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
   plane.velocity.copy(forward.multiplyScalar(plane.speed));
-  plane.velocity.y += Math.max(0, -plane.pitch * plane.speed * 0.5) * dt - 0.3 * dt;
+  plane.velocity.y += physics.verticalVelocityDelta;
   plane.position.add(plane.velocity.clone().multiplyScalar(dt));
 
-  // Terrain collision
-  const terrainHeight = height(plane.position.x, plane.position.z);
+  // Terrain collision — gentle push-up, not hard clamp
   const minAlt = Math.max(terrainHeight + 10, -5 + 5);
   if (plane.position.y < minAlt) {
     plane.position.y = minAlt;
+    // Ground proximity: push nose up gently
     plane.pitch = Math.max(0, plane.pitch * 0.5 - 0.1);
+    // Bounce: add upward velocity
+    plane.velocity.y = Math.max(plane.velocity.y, 5);
   }
+
+  // ── Store physics state for HUD/audio ──
+  plane._physics = physics;
+
+  // ── Stall buffeting ──
+  updateBuffeting(dt, physics.isStalling);
 
   // ── Aircraft visual ──
   aircraft.position.copy(plane.position);
   aircraft.quaternion.copy(plane.quaternion);
+  // Apply stall shake to aircraft mesh
+  applyBuffetShake(aircraft, gameTime, buffeting.intensity);
   prop.rotation.z += plane.throttle * 30 * dt;
 
   // Camera follow with smooth lerp
   const camOffset = new THREE.Vector3(0, 3, 12).applyQuaternion(plane.quaternion);
-  camera.position.lerp(plane.position.clone().add(camOffset), dt * 4);
+  const camTarget = plane.position.clone().add(camOffset);
+  camera.position.lerp(camTarget, dt * 4);
+  // Apply stall shake to camera (amplified slightly for visibility)
+  if (buffeting.intensity > 0.01) {
+    const camShake = buffeting.intensity * 0.3;
+    camera.position.x += Math.sin(gameTime * 35 * Math.PI * 2) * camShake;
+    camera.position.y += Math.cos(gameTime * 28 * Math.PI * 2) * camShake * 0.7;
+  }
   camera.lookAt(plane.position.clone().add(new THREE.Vector3(0, 0, -30).applyQuaternion(plane.quaternion)));
 
   // ── Terrain chunks ──
@@ -422,7 +468,7 @@ function loop() {
 
   // ── Audio ──
   if (audioReady) {
-    updateAudio(plane.throttle, plane.speed, plane.pitch);
+    updateAudio(plane.throttle, plane.speed, plane.pitch, plane._physics?.isStalling ?? false);
   }
 
   if (renderer) renderer.render(scene, camera);
@@ -460,6 +506,14 @@ window.skyDrifterDebug = {
     raining: isRaining(),
     audio: getAudioStatus(),
     boost: { energy: Math.round(boostResult.energy), active: boostResult.active },
+    physics: plane._physics ? {
+      speed: Math.round(plane._physics.newSpeed),
+      isStalling: plane._physics.isStalling,
+      gForce: plane._physics.gForce.toFixed(1),
+      cl: plane._physics.cl.toFixed(3),
+      cd: plane._physics.cd.toFixed(5),
+    } : null,
+    buffeting: { intensity: Math.round(buffeting.intensity * 100) / 100 },
   }),
 };
 

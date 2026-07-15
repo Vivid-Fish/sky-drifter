@@ -5,7 +5,10 @@ let windGain = null;
 let engineOsc = null;
 let windNode = null;
 let themeSource = null;
+let stallGain = null;
+let stallNode = null;
 let started = false;
+let lastStallState = false; // track stall transitions for one-shot sounds
 
 export const audioAssets = {};
 
@@ -111,6 +114,30 @@ export function initAudio() {
     windGain.connect(audioCtx.destination);
     windNode.start();
 
+    // Stall rumble (low-frequency noise when stalling)
+    const stallBufferSize = 2 * audioCtx.sampleRate;
+    const stallBuffer = audioCtx.createBuffer(1, stallBufferSize, audioCtx.sampleRate);
+    const stallOutput = stallBuffer.getChannelData(0);
+    for (let i = 0; i < stallBufferSize; i++) {
+      stallOutput[i] = Math.random() * 2 - 1;
+    }
+    stallNode = audioCtx.createBufferSource();
+    stallNode.buffer = stallBuffer;
+    stallNode.loop = true;
+
+    const stallFilter = audioCtx.createBiquadFilter();
+    stallFilter.type = 'lowpass';
+    stallFilter.frequency.value = 120;
+    stallFilter.Q.value = 1;
+
+    stallGain = audioCtx.createGain();
+    stallGain.gain.value = 0;
+
+    stallNode.connect(stallFilter);
+    stallFilter.connect(stallGain);
+    stallGain.connect(audioCtx.destination);
+    stallNode.start();
+
     started = true;
     startTheme();
   } catch (e) {
@@ -124,7 +151,7 @@ export function resumeAudio() {
   }
 }
 
-export function updateAudio(throttle, speed, pitch) {
+export function updateAudio(throttle, speed, pitch, isStalling = false) {
   if (!started || !engineGain) return;
 
   // Engine pitch based on throttle
@@ -138,6 +165,12 @@ export function updateAudio(throttle, speed, pitch) {
   // Wind based on speed
   const windVol = Math.min(0.06, (speed / 200) * 0.1);
   windGain.gain.setTargetAtTime(windVol, audioCtx.currentTime, 0.2);
+
+  // Stall rumble — fades in when stalling, fades out when recovering
+  if (stallGain) {
+    const stallTarget = isStalling ? 0.08 : 0;
+    stallGain.gain.setTargetAtTime(stallTarget, audioCtx.currentTime, isStalling ? 0.15 : 0.4);
+  }
 }
 
 export function getAudioStatus() {
