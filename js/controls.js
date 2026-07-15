@@ -218,11 +218,12 @@ export function applyControls(plane, controls, dt) {
     plane.roll += gyroGamma * rollSpeed * 1.2 * dt;
   }
 
-  // Very gentle damping only — preserves player attitude, prevents infinite drift
-  // Decay is slow enough that sustained input easily overcomes it
+  // Aerodynamic damping on angular rates (pitch rate, roll rate)
+  // Heading (yaw) is NOT damped — it's an accumulated angle, not a rate.
+  // Real flight: pitch rate decays (longitudinal damping), roll rate decays
+  // (roll damping + dihedral), but heading persists.
   plane.pitch *= Math.pow(0.995, dt * 60);
   plane.roll *= Math.pow(0.993, dt * 60);
-  plane.yaw *= Math.pow(0.998, dt * 60);
 
   // Generous clamps: allow barrel rolls (±π roll), steep climbs/dives
   plane.pitch = Math.max(-1.5, Math.min(1.5, plane.pitch));

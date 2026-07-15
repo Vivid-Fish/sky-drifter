@@ -354,6 +354,13 @@ function loop() {
     playSound(audioAssets.boost, 0.25);
   }
 
+  // ── Heading from banked turns (real flight physics) ──
+  // When rolled, horizontal component of lift turns the aircraft.
+  // Turn rate = g * tan(roll) / speed (standard coordinated turn).
+  // Q/E keys act as rudder — add yaw rate on top.
+  const turnRate = 9.81 * Math.tan(plane.roll) / Math.max(plane.speed, 10);
+  plane.yaw += turnRate * dt;
+
   const euler = new THREE.Euler(plane.pitch, plane.yaw, plane.roll, 'YXZ');
   const targetQuat = new THREE.Quaternion().setFromEuler(euler);
   plane.quaternion.slerp(targetQuat, dt * 3);
