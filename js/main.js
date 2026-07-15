@@ -160,9 +160,13 @@ const plane = {
   position: new THREE.Vector3(0, 220, 0),
   velocity: new THREE.Vector3(0, 0, -80),
   quaternion: new THREE.Quaternion(),
+  // Persistent angles (do NOT decay to zero)
   pitch: 0,
   roll: 0,
   yaw: 0,
+  // Angular rates (decay from aerodynamic damping)
+  pitchRate: 0,
+  rollRate: 0,
   throttle: 0.5,
   speed: 80,
 };
@@ -338,6 +342,11 @@ function loop() {
 
   // ── Controls ──
   applyControls(plane, controls, dt);
+
+  // Integrate angular rates into persistent angles
+  // (rates decay from damping, angles persist until counter-input)
+  plane.pitch += plane.pitchRate * dt;
+  plane.roll += plane.rollRate * dt;
 
   // ── Boost ──
   boostResult = updateBoost(dt, controls.boostOn);
