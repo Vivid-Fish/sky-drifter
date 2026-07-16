@@ -98,13 +98,10 @@ export function getGroundEffect(altitude) {
 export function computeAccelerations(state) {
   const { speed, pitch, altitude, throttle } = state;
 
-  // Angle of attack: pitch angle scaled by speed ratio.
-  // At cruise speed, pitch maps 1:1 to AoA.
-  // At low speed, same pitch produces less AoA (wings need more angle for same lift).
-  // This prevents stall at every pitch input — you need both high pitch AND low speed.
-  const cruiseSpeed = 120; // m/s — speed at which pitch maps directly to AoA
-  const speedRatio = Math.min(speed / cruiseSpeed, 1.5);
-  const aoa = pitch * speedRatio;
+  // Angle of attack: positive pitch = nose up = positive AoA.
+  // Negative pitch (diving) = negative AoA — no stall warning.
+  // Lift is symmetric (works inverted), but stall warning is nose-up only.
+  const aoa = pitch;
 
   // Lift
   const cl = getLiftCoefficient(aoa);
@@ -123,10 +120,10 @@ export function computeAccelerations(state) {
   const liftDirection = Math.sign(cl) || 0; // 0 when cl is exactly 0
   const verticalAccel = liftDirection * liftAccel - GRAVITY;
 
-  // Stall detection: high AoA + low speed
-  // At low speed, even moderate pitch can stall.
-  // At high speed, you need extreme pitch to stall.
-  const isStalling = Math.abs(aoa) > STALL_AOA * 0.7 && speed < 80;
+  // Stall detection: positive AoA only (nose-up stall).
+  // Negative AoA (diving) doesn't trigger stall.
+  // Low speed makes stall more likely (less margin).
+  const isStalling = aoa > STALL_AOA * 0.7 && speed < 90;
 
   return {
     verticalAccel,
