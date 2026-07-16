@@ -171,6 +171,14 @@ const plane = {
   speed: 80,
 };
 
+// ─── Cached temp objects (avoid per-frame GC) ───────────────────
+const _euler = new THREE.Euler();
+const _targetQuat = new THREE.Quaternion();
+const _forward = new THREE.Vector3();
+const _camOffset = new THREE.Vector3();
+const _camTarget = new THREE.Vector3();
+const _lookTarget = new THREE.Vector3();
+
 // ─── Controls ─────────────────────────────────────────────────────
 const controls = setupControls(plane);
 
@@ -370,14 +378,15 @@ function loop() {
   const turnRate = 9.81 * Math.tan(plane.roll) / Math.max(plane.speed, 10);
   plane.yaw += turnRate * dt;
 
-  const euler = new THREE.Euler(plane.pitch, plane.yaw, plane.roll, 'YXZ');
-  const targetQuat = new THREE.Quaternion().setFromEuler(euler);
-  plane.quaternion.slerp(targetQuat, dt * 3);
+  _euler.set(plane.pitch, plane.yaw, plane.roll, 'YXZ');
+  _targetQuat.setFromEuler(_euler);
+  plane.quaternion.slerp(_targetQuat, dt * 3);
 
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.quaternion);
-  plane.velocity.copy(forward.multiplyScalar(plane.speed));
+  _forward.set(0, 0, -1).applyQuaternion(plane.quaternion);
+  plane.velocity.copy(_forward.multiplyScalar(plane.speed));
   plane.velocity.y += physics.verticalVelocityDelta;
-  plane.position.add(plane.velocity.clone().multiplyScalar(dt));
+  plane.position.add(_forward.multiplyScalar(plane.speed * dt));
+  plane.position.y += physics.verticalVelocityDelta * dt;
 
   // Terrain collision — gentle push-up, not hard clamp
   const minAlt = Math.max(terrainHeight + 10, -5 + 5);
@@ -403,16 +412,17 @@ function loop() {
   prop.rotation.z += plane.throttle * 30 * dt;
 
   // Camera follow with smooth lerp
-  const camOffset = new THREE.Vector3(0, 3, 12).applyQuaternion(plane.quaternion);
-  const camTarget = plane.position.clone().add(camOffset);
-  camera.position.lerp(camTarget, dt * 4);
+  _camOffset.set(0, 3, 12).applyQuaternion(plane.quaternion);
+  _camTarget.copy(plane.position).add(_camOffset);
+  camera.position.lerp(_camTarget, dt * 4);
   // Apply stall shake to camera (amplified slightly for visibility)
   if (buffeting.intensity > 0.01) {
     const camShake = buffeting.intensity * 0.3;
     camera.position.x += Math.sin(gameTime * 35 * Math.PI * 2) * camShake;
     camera.position.y += Math.cos(gameTime * 28 * Math.PI * 2) * camShake * 0.7;
   }
-  camera.lookAt(plane.position.clone().add(new THREE.Vector3(0, 0, -30).applyQuaternion(plane.quaternion)));
+  _lookTarget.set(0, 0, -30).applyQuaternion(plane.quaternion).add(plane.position);
+  camera.lookAt(_lookTarget);
 
   // ── Terrain chunks ──
   chunkTimer += dt;

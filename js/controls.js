@@ -73,12 +73,16 @@ export function setupControls(plane) {
   // Gyroscope
   let gyroOn = false;
   const gyroBtn = document.getElementById('gyro-btn');
+  // Calibration offsets — captured when gyro button is pressed
+  let gyroBetaOffset = 45, gyroGammaOffset = 0;
   gyroBtn.addEventListener('click', async () => {
     if (!gyroOn) {
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
         try { const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted') return; } catch (e) { return; }
       }
       gyroOn = true;
+      // Calibrate: capture current orientation as neutral
+      // (next deviceorientation event will set the offsets)
       gyroBtn.classList.add('on');
       gyroBtn.setAttribute('aria-pressed', 'true');
     } else {
@@ -89,15 +93,26 @@ export function setupControls(plane) {
   });
 
   let gyroBeta = 0, gyroGamma = 0;
+  let gyroCalibrated = false;
   window.addEventListener('deviceorientation', (e) => {
     if (!gyroOn) return;
+    // Calibrate on first reading after button press
+    if (!gyroCalibrated) {
+      gyroBetaOffset = e.beta || 45;
+      gyroGammaOffset = e.gamma || 0;
+      gyroCalibrated = true;
+      return;
+    }
     // beta: -180 to 180 (front/back), gamma: -90 to 90 (left/right)
-    // Center around 45 degrees (phone held at angle)
-    // Increased sensitivity: map ±20° phone tilt to full ±1 control range
-    const betaRaw = (e.beta || 0) - 45;
-    const gammaRaw = e.gamma || 0;
-    gyroBeta = Math.max(-1, Math.min(1, betaRaw / 20));
-    gyroGamma = Math.max(-1, Math.min(1, gammaRaw / 20));
+    // Subtract calibration offset so neutral = wherever user held phone
+    // Sensitivity: map ±25° from neutral to full ±1 control range
+    const betaRaw = (e.beta || gyroBetaOffset) - gyroBetaOffset;
+    const gammaRaw = (e.gamma || gyroGammaOffset) - gyroGammaOffset;
+    gyroBeta = Math.max(-1, Math.min(1, betaRaw / 25));
+    // Gamma: positive = tilted right → should roll right (negative rollRate)
+    // Keyboard: A (left) = positive rollRate, D (right) = negative rollRate
+    // So gamma needs to be negated to match keyboard direction.
+    gyroGamma = -Math.max(-1, Math.min(1, gammaRaw / 25));
   });
 
   // ─── Keyboard (global) ──────────────────────────────────────────

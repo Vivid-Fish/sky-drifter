@@ -57,7 +57,7 @@ function startTheme() {
   themeSource.buffer = audioAssets.theme;
   themeSource.loop = true;
   const gain = audioCtx.createGain();
-  gain.gain.value = 0.1;
+  gain.gain.value = 0.25;
   themeSource.connect(gain);
   gain.connect(audioCtx.destination);
   themeSource.start();
