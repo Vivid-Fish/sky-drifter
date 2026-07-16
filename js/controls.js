@@ -195,35 +195,48 @@ export function setupControls(plane) {
 
 export function applyControls(plane, controls, dt) {
   const { joy, keys, gyroBeta, gyroGamma, gyroOn } = controls;
-  const pitchSpeed = 2.0, rollSpeed = 3.5, yawSpeed = 1.5;
+  const pitchMax = 1.8, rollMax = 3.5, yawSpeed = 1.5;
 
-  // Keyboard — rate commands (like real aircraft: stick deflection = target rate)
-  if (keys['KeyW']) plane.pitchRate -= pitchSpeed;
-  if (keys['KeyS']) plane.pitchRate += pitchSpeed;
-  if (keys['KeyA']) plane.rollRate += rollSpeed;   // A = left bank
-  if (keys['KeyD']) plane.rollRate -= rollSpeed;   // D = right bank
+  // Rudder yaw — direct accumulation (not a rate)
   if (keys['KeyQ']) plane.yaw += yawSpeed * dt;
   if (keys['KeyE']) plane.yaw -= yawSpeed * dt;
   if (keys['Space']) plane.throttle = Math.max(0, plane.throttle - 0.5 * dt);
 
-  // Touch joystick - left stick: pitch/roll, right stick: yaw/pitch
-  plane.pitchRate -= joy.l.y * pitchSpeed * 1.5;
-  plane.rollRate -= joy.l.x * rollSpeed * 1.5;
-  plane.yaw += joy.r.x * yawSpeed * dt;
-  plane.pitchRate += joy.r.y * pitchSpeed * 1.2;
+  // Keyboard — rate commands: SET target rate, don't accumulate
+  let targetPitchRate = 0, targetRollRate = 0;
+  if (keys['KeyW']) targetPitchRate -= pitchMax;
+  if (keys['KeyS']) targetPitchRate += pitchMax;
+  if (keys['KeyA']) targetRollRate += rollMax;   // A = left bank
+  if (keys['KeyD']) targetRollRate -= rollMax;   // D = right bank
 
-  // Gyroscope — direct rate command
+  // Touch joystick — blend into target rates
+  targetPitchRate -= joy.l.y * pitchMax * 1.5;
+  targetRollRate -= joy.l.x * rollMax * 1.5;
+  plane.yaw += joy.r.x * yawSpeed * dt;
+  targetPitchRate += joy.r.y * pitchMax * 1.2;
+
+  // Gyroscope — blend into target rates
   if (gyroOn) {
-    plane.pitchRate += gyroBeta * pitchSpeed * 1.2;
-    plane.rollRate += gyroGamma * rollSpeed * 1.2;
+    targetPitchRate += gyroBeta * pitchMax * 1.2;
+    targetRollRate += gyroGamma * rollMax * 1.2;
   }
 
-  // Aerodynamic damping on angular RATES only.
-  // Real flight: pitch rate decays (longitudinal damping),
-  // roll rate decays (roll damping + dihedral).
-  // Angles (pitch, roll, yaw) persist — they are NOT rates.
-  plane.pitchRate *= Math.pow(0.995, dt * 60);
-  plane.rollRate *= Math.pow(0.993, dt * 60);
+  // Apply target rates with smooth response time.
+  // Real aircraft: control surfaces deflect → rate builds over ~100-200ms.
+  // responseTime controls how quickly we reach the target.
+  const responseTime = 0.15; // seconds to reach 63% of target
+  const blend = 1 - Math.exp(-dt / responseTime);
+  plane.pitchRate = plane.pitchRate * (1 - blend) + targetPitchRate * blend;
+  plane.rollRate = plane.rollRate * (1 - blend) + targetRollRate * blend;
+
+  // Aerodynamic damping on rates when no input.
+  // When input is zero, rates decay to level flight.
+  if (Math.abs(targetPitchRate) < 0.01) {
+    plane.pitchRate *= Math.pow(0.9, dt * 60);
+  }
+  if (Math.abs(targetRollRate) < 0.01) {
+    plane.rollRate *= Math.pow(0.88, dt * 60);
+  }
 
   // Clamp pitch to prevent gimbal weirdness; roll is unbounded (barrel rolls)
   plane.pitch = Math.max(-1.5, Math.min(1.5, plane.pitch));

@@ -98,9 +98,13 @@ export function getGroundEffect(altitude) {
 export function computeAccelerations(state) {
   const { speed, pitch, altitude, throttle } = state;
 
-  // Angle of attack: pitch rate maps to AoA
-  // In arcade model, pitch input directly drives AoA
-  const aoa = pitch;
+  // Angle of attack: pitch angle scaled by speed ratio.
+  // At cruise speed, pitch maps 1:1 to AoA.
+  // At low speed, same pitch produces less AoA (wings need more angle for same lift).
+  // This prevents stall at every pitch input — you need both high pitch AND low speed.
+  const cruiseSpeed = 120; // m/s — speed at which pitch maps directly to AoA
+  const speedRatio = Math.min(speed / cruiseSpeed, 1.5);
+  const aoa = pitch * speedRatio;
 
   // Lift
   const cl = getLiftCoefficient(aoa);
@@ -120,6 +124,8 @@ export function computeAccelerations(state) {
   const verticalAccel = liftDirection * liftAccel - GRAVITY;
 
   // Stall detection: high AoA + low speed
+  // At low speed, even moderate pitch can stall.
+  // At high speed, you need extreme pitch to stall.
   const isStalling = Math.abs(aoa) > STALL_AOA * 0.7 && speed < 80;
 
   return {

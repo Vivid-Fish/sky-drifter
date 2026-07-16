@@ -135,8 +135,10 @@ test('positive pitch generates upward lift at speed', () => {
 });
 
 test('high AoA triggers stall flag', () => {
-  const a = computeAccelerations({ speed: 50, pitch: 0.5, roll: 0, altitude: 100, throttle: 0.5 });
-  assert.ok(a.isStalling, 'AoA=0.5 at speed=50 should be stalling');
+  // Stall requires both high pitch AND low speed.
+  // At speed=40, effective AoA = pitch * (40/120). Need pitch > 0.45*0.7 * 120/40 ≈ 0.95.
+  const a = computeAccelerations({ speed: 40, pitch: 1.2, roll: 0, altitude: 100, throttle: 0.5 });
+  assert.ok(a.isStalling, 'pitch=1.2 at speed=40 should be stalling');
 });
 
 test('high speed avoids stall even at moderate AoA', () => {
@@ -186,7 +188,8 @@ test('boost multiplier increases speed gain', () => {
 });
 
 test('stall detected at high AoA + low speed', () => {
-  const r = stepPhysics({ speed: 50, pitch: 0.5, roll: 0, throttle: 0.3 }, 100, 1, 0.016);
+  // At speed=30, effective AoA = pitch * (30/120). Need pitch > 0.45*0.7 * 120/30 ≈ 1.26.
+  const r = stepPhysics({ speed: 30, pitch: 1.5, roll: 0, throttle: 0.3 }, 100, 1, 0.016);
   assert.ok(r.isStalling, 'should be stalling');
 });
 
