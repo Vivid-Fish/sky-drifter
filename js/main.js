@@ -383,9 +383,9 @@ function loop() {
   plane.quaternion.slerp(_targetQuat, dt * 3);
 
   _forward.set(0, 0, -1).applyQuaternion(plane.quaternion);
-  plane.velocity.copy(_forward.multiplyScalar(plane.speed));
+  plane.velocity.copy(_forward).multiplyScalar(plane.speed);
   plane.velocity.y += physics.verticalVelocityDelta;
-  plane.position.add(_forward.multiplyScalar(plane.speed * dt));
+  plane.position.addScaledVector(_forward, plane.speed * dt);
   plane.position.y += physics.verticalVelocityDelta * dt;
 
   // Terrain collision — gentle push-up, not hard clamp
